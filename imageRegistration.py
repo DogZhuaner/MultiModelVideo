@@ -1,3 +1,5 @@
+from time import sleep
+
 import cv2
 import tkinter as tk
 from tkinter import ttk, messagebox
@@ -6,15 +8,10 @@ import time
 import numpy as np
 from PIL import Image, ImageTk
 import os
-from cameraManager import camera
-import sys
-import importlib.util
+from MultiModelVideo.cameraManager import camera
 
-# 动态导入main_GPT模块
-spec = importlib.util.spec_from_file_location("main_GPT", "../main_GPT.py")
-main_GPT = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(main_GPT)
-
+base_dir = os.path.dirname(os.path.abspath(__file__))
+reference_image_path = os.path.join(base_dir, "cameraRegistration/reference.jpg")
 
 class CameraCalibrationSystem:
     def __init__(self):
@@ -34,7 +31,7 @@ class CameraCalibrationSystem:
         self.stabilize_start_time = 0
 
         # 参考图片路径配置 - 在这里修改参考图片路径
-        self.reference_image_path = "reference.jpg"  # 修改为你的参考图片路径
+        self.reference_image_path = reference_image_path  # 修改为你的参考图片路径
         self.reference_image = None
 
         # 线程控制
@@ -443,7 +440,6 @@ class CameraCalibrationSystem:
             self.status_var.set("校准完成！摄像头已准备就绪")
             self.status_label.configure(fg='#16a34a')
             self.next_btn.configure(state='normal')
-            self.start_detection()
         elif self.reference_image is None:
             self.status_var.set("参考图片未加载")
             self.status_label.configure(fg='#dc2626')
@@ -477,20 +473,39 @@ class CameraCalibrationSystem:
         self.countdown_var.set("")
 
     def countdown_loop(self):
-        """倒计时循环 - 恢复标准时间"""
-        for i in range(3, 0, -1):  # 恢复到3秒
+        """倒计时循环 - 修改为自动调用start_detection"""
+        for i in range(3, 0, -1):  # 3秒倒计时
             if not self.is_stabilizing or not self.running:
                 break
 
             self.countdown = i
-            self.root.after(0, lambda: self.countdown_var.set(f"保持稳定 {i}s"))
+            self.root.after(0, lambda i=i: self.countdown_var.set(f"保持稳定 {i}s"))
             time.sleep(1)
 
+        # 倒计时结束后的处理
         if self.is_stabilizing and self.running:
+            # 设置校准完成状态
             self.is_calibrated = True
             self.is_stabilizing = False
             self.countdown = 0
+
+            # 清除倒计时显示
             self.root.after(0, lambda: self.countdown_var.set(""))
+
+            # 延迟一小段时间让UI更新，然后自动调用start_detection
+            self.root.after(500, self.auto_start_detection)
+
+    def auto_start_detection(self):
+        """自动启动检测（倒计时结束后调用）"""
+        print("倒计时结束，自动启动检测...")
+
+        # 更新UI状态
+        self.status_var.set("校准完成！即将启动检测程序...")
+        self.status_label.configure(fg='#16a34a')
+        self.next_btn.configure(state='normal')
+
+        # 短暂延迟后调用start_detection
+        self.root.after(1000, self.start_detection)  # 1秒后自动调用
 
     def reset_calibration(self):
         """重置校准"""
@@ -511,41 +526,55 @@ class CameraCalibrationSystem:
 
     def start_detection(self):
         """开始检测 - 校准完成后的程序出口"""
-        # 显示提示信息
-        result = messagebox.askquestion("校准完成",
-                                        "校准完成！\n是否进入电路配盘检测模式？\n\n点击'是'将关闭校准窗口并启动检测程序。",
-                                        icon='question')
+        print("校准结束！准备启动检测程序...")
 
-        if result == 'yes':
-            # 这里是程序的出口点 - 校准完成后关闭窗口
-            print("校准完成，准备启动检测程序...")
+        # 可选：显示确认对话框（如果需要用户确认）
+        # result = messagebox.askquestion("校准完成",
+        #                                 "校准完成！\n是否进入电路配盘检测模式？\n\n点击'是'将关闭校准窗口并启动检测程序。",
+        #                                 icon='question')
+        #
+        # if result == 'yes':
+
+        # 直接启动检测程序，不需要用户确认
+        try:
+            print("正在关闭校准窗口...")
 
             # 停止所有线程
             self.running = False
 
-            # 延迟关闭窗口，确保线程能够正常结束
-            self.root.after(500, self.close_window)
+            # 立即关闭当前窗口
+            self.close_window()
+
+            # 短暂延迟确保窗口完全关闭
+            time.sleep(0.5)
 
             # 启动主窗口
-            main_GPT.launch_main_window()
+            print("正在启动主检测窗口...")
+            #main_GPT.launch_main_window()
+
+        except Exception as e:
+            print(f"启动检测程序时发生错误: {e}")
+            # 如果出错，显示错误信息
+            messagebox.showerror("错误", f"启动检测程序失败：{str(e)}")
 
     def close_window(self):
         """关闭窗口"""
         try:
-            self.root.quit()
-            self.root.destroy()
-            print("校准窗口已关闭")
+            # 停止所有线程
+            self.running = False
 
-            # 在这里可以调用下一个程序或返回到主程序
-            # 例如:
-            # import main_detection_system
-            # main_detection_system.run()
+            # 销毁窗口
+            if self.root:
+                self.root.quit()
+                self.root.destroy()
+                print("校准窗口已关闭")
 
         except Exception as e:
             print(f"关闭窗口时发生错误: {e}")
 
     def on_closing(self):
         """关闭程序"""
+        print("用户关闭窗口")
         self.running = False
         # 等待线程结束
         time.sleep(0.2)

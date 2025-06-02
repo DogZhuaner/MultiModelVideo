@@ -16,7 +16,10 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtGui import QImage, QPixmap, QPalette, QColor, QFont, QPainter
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QCoreApplication
-import uuid
+
+# 导入摄像头管理器
+from MultiModelVideo.cameraManager import camera
+
 # OpenAI GPT支持
 try:
     import openai
@@ -27,7 +30,9 @@ OPENAI_API_KEY = "在这里填写你的OpenAI API Key"  # 例如：sk-xxxxxx
 
 logging.basicConfig(filename='app.log', level=logging.INFO)
 
+
 class CameraThread(QThread):
+    """修改后的摄像头线程 - 使用cameraManager"""
     new_display_frame = pyqtSignal(bytes)
     capture_frame_signal = pyqtSignal(np.ndarray)
 
@@ -37,37 +42,51 @@ class CameraThread(QThread):
         self.last_frame = None
 
     def run(self):
-        cap = None
+        """使用cameraManager获取帧"""
         try:
-            for backend in [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]:
-                cap = cv2.VideoCapture(0, backend)
-                if cap.isOpened():
-                    break
-            else:
-                raise RuntimeError("无法打开摄像头")
-            cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
-            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
             self.running = True
+            print("摄像头线程启动，使用cameraManager...")
+
             while self.running:
-                ret, frame = cap.read()
-                if not ret:
-                    break
-                self.last_frame = frame.copy()
-                success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                if success:
-                    self.new_display_frame.emit(buffer.tobytes())
-                self.msleep(30)
+                # 使用cameraManager获取帧
+                ret, frame = camera.get_frame()
+
+                if ret and frame is not None:
+                    # 保存最新帧
+                    self.last_frame = frame.copy()
+
+                    # 编码并发送显示帧
+                    success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                    if success:
+                        self.new_display_frame.emit(buffer.tobytes())
+                else:
+                    # 如果获取失败，稍微增加等待时间
+                    time.sleep(0.1)
+                    continue
+
+                # 控制帧率
+                time.sleep(0.033)  # 约30FPS
+
+        except Exception as e:
+            print(f"摄像头线程异常: {e}")
         finally:
-            if cap is not None and cap.isOpened():
-                cap.release()
+            print("摄像头线程结束")
 
     def stop(self):
+        """停止摄像头线程"""
         self.running = False
         self.wait(1000)
 
     def capture_current_frame(self):
+        """捕获当前帧"""
         if self.last_frame is not None:
             self.capture_frame_signal.emit(self.last_frame.copy())
+        else:
+            # 如果没有缓存帧，直接从摄像头管理器获取
+            ret, frame = camera.get_frame()
+            if ret and frame is not None:
+                self.capture_frame_signal.emit(frame.copy())
+
 
 class AnalysisWorker(QThread):
     analysis_complete = pyqtSignal(dict)
@@ -82,14 +101,14 @@ class AnalysisWorker(QThread):
     def enhance_image(self, img):
         # 自动白平衡
         img_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
-        img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+        img_yuv[:, :, 0] = cv2.equalizeHist(img_yuv[:, :, 0])
         img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
         # 对比度增强
         alpha = 1.2  # 对比度控制
-        beta = 10    # 亮度控制
+        beta = 10  # 亮度控制
         img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
         # 锐化
-        kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
         img = cv2.filter2D(img, -1, kernel)
         return img
 
@@ -120,14 +139,19 @@ class AnalysisWorker(QThread):
                 json_start = result.find('{')
                 json_end = result.rfind('}')
                 if json_start != -1 and json_end != -1:
-                    result_json = json.loads(result[json_start:json_end+1])
+                    result_json = json.loads(result[json_start:json_end + 1])
                 else:
-                    result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分", "正确接法": ""}
+                    result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分",
+                                   "正确接法": ""}
             except Exception:
-                result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分", "正确接法": ""}
+                result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分",
+                               "正确接法": ""}
             self.analysis_complete.emit(result_json)
         except Exception as e:
-            self.analysis_complete.emit({"操作描述": f"分析失败: {str(e)}", "得分": 0, "是否正确": False, "错误提示": "系统异常", "正确接法": ""})
+            self.analysis_complete.emit(
+                {"操作描述": f"分析失败: {str(e)}", "得分": 0, "是否正确": False, "错误提示": "系统异常",
+                 "正确接法": ""})
+
 
 class MarkableLabel(QLabel):
     def __init__(self, *args, **kwargs):
@@ -149,7 +173,7 @@ class MarkableLabel(QLabel):
             return
         pixmap = self.display_pixmap.copy()
         painter = QPainter(pixmap)
-        painter.setPen(QColor(255,0,0))
+        painter.setPen(QColor(255, 0, 0))
         font = QFont("Microsoft YaHei", 16, QFont.Bold)
         painter.setFont(font)
         for mark in self.marks:
@@ -157,6 +181,7 @@ class MarkableLabel(QLabel):
             painter.drawText(x, y, mark["name"])
         painter.end()
         super().setPixmap(pixmap)
+
 
 class OpenAIGPTWorker(QThread):
     analysis_complete = pyqtSignal(dict)
@@ -169,7 +194,9 @@ class OpenAIGPTWorker(QThread):
 
     def run(self):
         if openai is None:
-            self.analysis_complete.emit({"操作描述": "未安装openai库", "得分": 0, "是否正确": False, "错误提示": "未安装openai库", "正确接法": ""})
+            self.analysis_complete.emit(
+                {"操作描述": "未安装openai库", "得分": 0, "是否正确": False, "错误提示": "未安装openai库",
+                 "正确接法": ""})
             return
         try:
             openai.api_key = self.api_key or OPENAI_API_KEY
@@ -184,14 +211,19 @@ class OpenAIGPTWorker(QThread):
                 json_start = result.find('{')
                 json_end = result.rfind('}')
                 if json_start != -1 and json_end != -1:
-                    result_json = json.loads(result[json_start:json_end+1])
+                    result_json = json.loads(result[json_start:json_end + 1])
                 else:
-                    result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分", "正确接法": ""}
+                    result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分",
+                                   "正确接法": ""}
             except Exception:
-                result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分", "正确接法": ""}
+                result_json = {"操作描述": result, "得分": 0, "是否正确": False, "错误提示": "未能解析得分",
+                               "正确接法": ""}
             self.analysis_complete.emit(result_json)
         except Exception as e:
-            self.analysis_complete.emit({"操作描述": f"OpenAI分析失败: {str(e)}", "得分": 0, "是否正确": False, "错误提示": "系统异常", "正确接法": ""})
+            self.analysis_complete.emit(
+                {"操作描述": f"OpenAI分析失败: {str(e)}", "得分": 0, "是否正确": False, "错误提示": "系统异常",
+                 "正确接法": ""})
+
 
 class PDFParseWorker(QThread):
     parse_complete = pyqtSignal(str, str)  # (text, error)
@@ -211,6 +243,7 @@ class PDFParseWorker(QThread):
             self.parse_complete.emit(text, "")
         except Exception as e:
             self.parse_complete.emit("", str(e))
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -267,7 +300,8 @@ class MainWindow(QMainWindow):
     def _init_ui(self):
         # 顶部彩色标题栏
         title_bar = QWidget()
-        title_bar.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4361ee, stop:1 #38b6ff); border-radius: 0 0 18px 18px;")
+        title_bar.setStyleSheet(
+            "background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #4361ee, stop:1 #38b6ff); border-radius: 0 0 18px 18px;")
         title_layout = QHBoxLayout(title_bar)
         title_label = QLabel("电路配盘接线操作分析系统")
         title_label.setObjectName("titleLabel")
@@ -278,7 +312,8 @@ class MainWindow(QMainWindow):
 
         # 新增：管理接线规则按钮
         self.btn_manage_rules = QPushButton("管理接线规则")
-        self.btn_manage_rules.setStyleSheet("background: #38b6ff; color: white; border-radius: 8px; padding: 6px 16px; font-size: 16px; font-weight: bold;")
+        self.btn_manage_rules.setStyleSheet(
+            "background: #38b6ff; color: white; border-radius: 8px; padding: 6px 16px; font-size: 16px; font-weight: bold;")
         self.btn_manage_rules.clicked.connect(self.show_rule_manager)
         title_layout.addWidget(self.btn_manage_rules)
         title_layout.setSpacing(16)
@@ -368,7 +403,7 @@ class MainWindow(QMainWindow):
         content_layout.addLayout(right_panel, 3)
 
         # 状态栏
-        self.statusBar().showMessage("系统就绪，等待启动摄像头...")
+        self.statusBar().showMessage("系统就绪，摄像头管理器已连接...")
 
         # 菜单栏-模型设置
         menubar = self.menuBar()
@@ -378,6 +413,7 @@ class MainWindow(QMainWindow):
         settings_menu.addAction(model_action)
 
     def _init_variables(self):
+        """初始化变量 - 修改摄像头相关部分"""
         self.camera_thread = CameraThread()
         self.camera_thread.new_display_frame.connect(self._update_video_frame)
         self.camera_thread.capture_frame_signal.connect(self._on_capture_frame)
@@ -395,21 +431,42 @@ class MainWindow(QMainWindow):
         self.rules = []  # [{"name": str, "content": str or dict}]
         self.selected_rule_index = None
 
+        # 显示摄像头管理器状态
+        camera_status = "主进程" if camera.is_master else "客户端进程"
+        print(f"摄像头管理器状态: {camera_status}")
+        self.statusBar().showMessage(f"系统就绪，摄像头管理器已连接 ({camera_status})...")
+
     def toggle_camera(self):
+        """切换摄像头状态 - 修改为使用摄像头管理器"""
         if self.camera_thread.isRunning():
             self.camera_thread.stop()
             self.btn_start.setText("启动摄像头")
             self.btn_analyze.setEnabled(False)
             self.btn_describe.setEnabled(False)
-            self.statusBar().showMessage("摄像头已停止")
+            self.statusBar().showMessage("摄像头显示已停止")
+            self.video_label.setText("摄像头显示已停止")
+            self.video_label.setStyleSheet("background:#222;color:white;font-size:20px;border-radius:10px;")
         else:
+            # 检查摄像头管理器是否可用
+            ret, frame = camera.get_frame()
+            if not ret or frame is None:
+                QMessageBox.warning(self, "摄像头错误",
+                                    "无法从摄像头管理器获取画面。\n"
+                                    "请确保:\n"
+                                    "1. 摄像头硬件正常连接\n"
+                                    "2. 其他程序没有占用摄像头\n"
+                                    "3. 摄像头管理器正常运行")
+                return
+
             self.camera_thread.start()
-            self.btn_start.setText("停止摄像头")
+            self.btn_start.setText("停止摄像头显示")
             self.btn_analyze.setEnabled(True)
             self.btn_describe.setEnabled(True)
-            self.statusBar().showMessage("摄像头运行中...")
+            self.statusBar().showMessage("摄像头显示运行中... (使用摄像头管理器)")
+            sh.start_handDetecton()
 
     def _update_video_frame(self, frame_data):
+        """更新视频帧显示"""
         self.last_frame = frame_data
         buffer = np.frombuffer(frame_data, dtype=np.uint8)
         frame = cv2.imdecode(buffer, cv2.IMREAD_COLOR)
@@ -420,28 +477,65 @@ class MainWindow(QMainWindow):
             self.auto_marks = marks
             qimg = QImage(rgb.data, w, h, ch * w, QImage.Format_RGB888)
             pixmap = QPixmap.fromImage(qimg)
-            self.video_label.setPixmap(pixmap.scaled(self.video_label.width(), self.video_label.height(), Qt.KeepAspectRatio))
+            self.video_label.setPixmap(
+                pixmap.scaled(self.video_label.width(), self.video_label.height(), Qt.KeepAspectRatio))
             self.video_label.set_marks(marks)
 
     def analyze_current(self):
-        if not self.camera_thread.isRunning() or self.last_frame is None:
-            QMessageBox.warning(self, "提示", "请先启动摄像头")
-            return
+        """分析当前操作 - 修改为直接从摄像头管理器获取帧"""
         rule = self.get_current_rule()
         if not rule:
             QMessageBox.warning(self, "提示", "请先新增并选择一个接线规则")
             return
+
+        # 直接从摄像头管理器获取当前帧
+        ret, frame = camera.get_frame()
+        if not ret or frame is None:
+            QMessageBox.warning(self, "提示", "无法获取摄像头画面，请检查摄像头状态")
+            return
+
         self.statusBar().showMessage("正在分析当前操作...")
         self.btn_analyze.setEnabled(False)
-        self.camera_thread.capture_current_frame()
+
+        # 处理获取到的帧
+        self._process_analysis_frame(frame)
+
+    def _process_analysis_frame(self, frame):
+        """处理分析用的帧"""
+        try:
+            # 编码帧数据
+            success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if success:
+                self._on_capture_frame_for_analysis(frame, buffer.tobytes())
+            else:
+                QMessageBox.warning(self, "错误", "图像编码失败")
+                self.btn_analyze.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"处理图像时发生错误: {str(e)}")
+            self.btn_analyze.setEnabled(True)
 
     def describe_current(self):
-        if not self.camera_thread.isRunning() or self.last_frame is None:
-            QMessageBox.warning(self, "提示", "请先启动摄像头")
+        """描述当前接线 - 修改为直接从摄像头管理器获取帧"""
+        # 直接从摄像头管理器获取当前帧
+        ret, frame = camera.get_frame()
+        if not ret or frame is None:
+            QMessageBox.warning(self, "提示", "无法获取摄像头画面，请检查摄像头状态")
             return
+
         self.statusBar().showMessage("正在描述当前接线...")
         self.btn_describe.setEnabled(False)
-        self._describe_frame(self.last_frame)
+
+        # 编码并处理帧
+        try:
+            success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+            if success:
+                self._describe_frame(buffer.tobytes())
+            else:
+                QMessageBox.warning(self, "错误", "图像编码失败")
+                self.btn_describe.setEnabled(True)
+        except Exception as e:
+            QMessageBox.critical(self, "错误", f"处理图像时发生错误: {str(e)}")
+            self.btn_describe.setEnabled(True)
 
     def _describe_frame(self, frame_data):
         self.describe_worker = DescribeWorker(
@@ -466,14 +560,16 @@ class MainWindow(QMainWindow):
                 self.standard_image_data = f.read()
             qimg = QImage(path)
             pixmap = QPixmap.fromImage(qimg)
-            self.std_img_label.setPixmap(pixmap.scaled(self.std_img_label.width(), self.std_img_label.height(), Qt.KeepAspectRatio))
+            self.std_img_label.setPixmap(
+                pixmap.scaled(self.std_img_label.width(), self.std_img_label.height(), Qt.KeepAspectRatio))
             self.std_img_label.setText("")
             self.statusBar().showMessage(f"已导入标准电路图：{path}")
         except Exception as e:
             QMessageBox.critical(self, "导入错误", str(e))
 
     def add_rule(self):
-        path, _ = QFileDialog.getOpenFileName(self, "新增接线规则", "", "所有支持文件 (*.json *.txt *.pdf *.doc *.docx);;JSON文件 (*.json);;文本文件 (*.txt);;PDF文件 (*.pdf);;Word文档 (*.doc *.docx)")
+        path, _ = QFileDialog.getOpenFileName(self, "新增接线规则", "",
+                                              "所有支持文件 (*.json *.txt *.pdf *.doc *.docx);;JSON文件 (*.json);;文本文件 (*.txt);;PDF文件 (*.pdf);;Word文档 (*.doc *.docx)")
         if not path:
             return
         try:
@@ -493,7 +589,8 @@ class MainWindow(QMainWindow):
             elif ext in ['pdf']:
                 self.statusBar().showMessage("正在解析PDF，请稍候...")
                 self.pdf_worker = PDFParseWorker(path)
-                self.pdf_worker.parse_complete.connect(lambda text, error, name=rule_name: self._on_add_rule_pdf_parsed(text, error, name))
+                self.pdf_worker.parse_complete.connect(
+                    lambda text, error, name=rule_name: self._on_add_rule_pdf_parsed(text, error, name))
                 self.pdf_worker.start()
                 return
             elif ext in ['doc', 'docx']:
@@ -524,27 +621,32 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage(f"PDF解析完成，已新增接线规则：{rule_name}")
 
     def _on_capture_frame(self, frame):
+        """处理捕获的帧 - 用于摄像头线程的信号"""
         success, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
         if success:
-            rule = self.get_current_rule()
-            rules_text = rule["content"] if rule else ""
-            if not isinstance(rules_text, str):
-                rules_text = json.dumps(rules_text, ensure_ascii=False)
-            prompt = (
+            self._on_capture_frame_for_analysis(frame, buffer.tobytes())
+
+    def _on_capture_frame_for_analysis(self, frame, buffer_data):
+        """处理用于分析的帧数据"""
+        rule = self.get_current_rule()
+        rules_text = rule["content"] if rule else ""
+        if not isinstance(rules_text, str):
+            rules_text = json.dumps(rules_text, ensure_ascii=False)
+        prompt = (
                 "你是一名电气工程教学专家。请分析当前画面中学生的电路接线操作，描述学生连接了哪些区域的哪些接线端。"
                 "请严格按照以下接线规则和评分标准进行评价和打分：\n" + rules_text +
                 "\n如果学生操作不符合任意一条规则，请指出错误，并给出正确接法建议。"
                 "请以如下JSON格式返回：{\"操作描述\": \"\", \"得分\": 90, \"是否正确\": true, \"错误提示\": \"\", \"正确接法\": \"\"}"
+        )
+        if self.model_type == "openai":
+            self.analysis_worker = OpenAIGPTWorker(prompt, self.openai_model_name, self.openai_api_key)
+        else:
+            self.analysis_worker = AnalysisWorker(
+                buffer_data, self.model_server, self.model_name,
+                prompt=prompt
             )
-            if self.model_type == "openai":
-                self.analysis_worker = OpenAIGPTWorker(prompt, self.openai_model_name, self.openai_api_key)
-            else:
-                self.analysis_worker = AnalysisWorker(
-                    buffer.tobytes(), self.model_server, self.model_name,
-                    prompt=prompt
-                )
-            self.analysis_worker.analysis_complete.connect(self._on_analysis_result)
-            self.analysis_worker.start()
+        self.analysis_worker.analysis_complete.connect(self._on_analysis_result)
+        self.analysis_worker.start()
 
     def _on_analysis_result(self, result):
         self.btn_analyze.setEnabled(True)
@@ -576,8 +678,10 @@ class MainWindow(QMainWindow):
             if result.get("正确接法", ""):
                 btn = msg.addButton("查看正确接法", QMessageBox.ActionRole)
             msg.addButton(QMessageBox.Ok)
+
             def show_correct():
                 QMessageBox.information(self, "正确接法", result.get("正确接法", "无"))
+
             if result.get("正确接法", ""):
                 btn.clicked.connect(show_correct)
             msg.exec_()
@@ -598,7 +702,8 @@ class MainWindow(QMainWindow):
             with open(path, 'w', encoding='utf-8') as f:
                 f.write("时间,操作描述,得分,是否正确\n")
                 for record in self.operation_history:
-                    f.write(f"{record['时间']},{record['操作描述']},{record['得分']},{'正确' if record['是否正确'] else '错误'}\n")
+                    f.write(
+                        f"{record['时间']},{record['操作描述']},{record['得分']},{'正确' if record['是否正确'] else '错误'}\n")
             self.statusBar().showMessage(f"历史记录已导出到 {path}")
         except Exception as e:
             QMessageBox.critical(self, "导出错误", str(e))
@@ -652,9 +757,26 @@ class MainWindow(QMainWindow):
             self.statusBar().showMessage("模型服务器设置已更新")
 
     def closeEvent(self, event):
-        self.camera_thread.stop()
+        """关闭事件 - 修改为释放摄像头管理器"""
+        print("正在关闭主窗口...")
+
+        # 停止摄像头线程
+        if self.camera_thread.isRunning():
+            self.camera_thread.stop()
+
+        # 释放摄像头管理器资源（如果需要的话）
+        try:
+            # 注意：通常不需要主动释放，因为摄像头管理器会自动管理资源
+            # camera.release()  # 只有在确实需要时才取消注释
+            pass
+        except Exception as e:
+            print(f"释放摄像头管理器时发生错误: {e}")
+
+        # 关闭OpenCV窗口
         cv2.destroyAllWindows()
+
         event.accept()
+        print("主窗口已关闭")
 
     def detect_components(self, frame):
         return []
@@ -679,6 +801,7 @@ class MainWindow(QMainWindow):
         btn_add = QPushButton("新增规则")
         btn_add.clicked.connect(self.add_rule)
         btn_del = QPushButton("删除选中规则")
+
         def delete_rule():
             row = rule_list.currentRow()
             if row >= 0:
@@ -688,13 +811,16 @@ class MainWindow(QMainWindow):
                 elif self.selected_rule_index and self.selected_rule_index > row:
                     self.selected_rule_index -= 1
                 rule_list.takeItem(row)
+
         btn_del.clicked.connect(delete_rule)
         btn_select = QPushButton("设为当前规则")
+
         def select_rule():
             row = rule_list.currentRow()
             if row >= 0:
                 self.selected_rule_index = row
                 dialog.accept()
+
         btn_select.clicked.connect(select_rule)
         btn_layout.addWidget(btn_add)
         btn_layout.addWidget(btn_del)
@@ -706,6 +832,7 @@ class MainWindow(QMainWindow):
         if self.selected_rule_index is not None and 0 <= self.selected_rule_index < len(self.rules):
             return self.rules[self.selected_rule_index]
         return None
+
 
 class DescribeWorker(QThread):
     describe_complete = pyqtSignal(dict)
@@ -719,14 +846,14 @@ class DescribeWorker(QThread):
     def enhance_image(self, img):
         # 自动白平衡
         img_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
-        img_yuv[:,:,0] = cv2.equalizeHist(img_yuv[:,:,0])
+        img_yuv[:, :, 0] = cv2.equalizeHist(img_yuv[:, :, 0])
         img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
         # 对比度增强
         alpha = 1.2
         beta = 10
         img = cv2.convertScaleAbs(img, alpha=alpha, beta=beta)
         # 锐化
-        kernel = np.array([[0, -1, 0], [-1, 5,-1], [0, -1, 0]])
+        kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
         img = cv2.filter2D(img, -1, kernel)
         return img
 
@@ -759,6 +886,7 @@ class DescribeWorker(QThread):
         except Exception as e:
             self.describe_complete.emit({"描述": f"描述失败: {str(e)}"})
 
+
 def launch_main_window():
     """启动主窗口的接口函数"""
     app = QApplication(sys.argv)
@@ -776,6 +904,7 @@ def launch_main_window():
     window = MainWindow()
     window.show()
     return app.exec_()
+
 
 if __name__ == '__main__':
     launch_main_window()
