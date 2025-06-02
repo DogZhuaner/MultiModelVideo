@@ -507,9 +507,9 @@ def main():
     # ==================== 配置区域 ====================
     # 修改这些路径为你的实际文件路径
 
-    REGIONS_FILE_PATH = "regions_rules.json"  # 区域特征文件路径
+    REGIONS_FILE_PATH = ".json"  # 区域特征文件路径
     TARGET_IMAGE_PATH = "live_capture.jpg"                        # 目标图像路径
-
+    regions_rules
     # ================================================
 
     try:
