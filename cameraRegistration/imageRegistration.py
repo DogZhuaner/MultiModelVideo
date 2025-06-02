@@ -13,7 +13,7 @@ class CameraCalibrationSystem:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("电路配盘系统摄像头校准")
-        self.root.geometry("1600x1000")  # 增大窗口以适应更大的显示区域
+        self.root.geometry("1280x900")  # 增大窗口以适应更大的显示区域
         self.root.configure(bg='#f0f8ff')
 
         # 摄像头相关 - 移除原有的摄像头初始化代码
