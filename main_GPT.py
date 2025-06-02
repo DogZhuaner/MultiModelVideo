@@ -759,16 +759,23 @@ class DescribeWorker(QThread):
         except Exception as e:
             self.describe_complete.emit({"描述": f"描述失败: {str(e)}"})
 
-if __name__ == '__main__':
+def launch_main_window():
+    """启动主窗口的接口函数"""
+    app = QApplication(sys.argv)
+    # 设置高DPI支持
     QCoreApplication.setAttribute(Qt.AA_EnableHighDpiScaling)
     QCoreApplication.setAttribute(Qt.AA_UseHighDpiPixmaps)
-    app = QApplication(sys.argv)
+    # 设置应用程序样式
     palette = QPalette()
     palette.setColor(QPalette.Window, QColor(248, 249, 250))
     palette.setColor(QPalette.WindowText, QColor(33, 37, 41))
     app.setPalette(palette)
     font = QFont("Microsoft YaHei", 12)
     app.setFont(font)
+    # 创建并显示主窗口
     window = MainWindow()
     window.show()
-    sys.exit(app.exec_())
+    return app.exec_()
+
+if __name__ == '__main__':
+    launch_main_window()
