@@ -6,6 +6,7 @@ import time
 import numpy as np
 from PIL import Image, ImageTk
 import os
+from MultiModelVideo.cameraManager import camera
 
 
 class CameraCalibrationSystem:
@@ -15,9 +16,7 @@ class CameraCalibrationSystem:
         self.root.geometry("1600x1000")  # 增大窗口以适应更大的显示区域
         self.root.configure(bg='#f0f8ff')
 
-        # 摄像头相关
-        self.cap = None
-        self.camera_running = False
+        # 摄像头相关 - 移除原有的摄像头初始化代码
         self.current_frame = None
 
         # 校准状态
@@ -31,14 +30,17 @@ class CameraCalibrationSystem:
         self.reference_image_path = "reference.jpg"  # 修改为你的参考图片路径
         self.reference_image = None
 
+        # 线程控制
+        self.running = True
+
         # 创建UI
         self.create_ui()
 
         # 加载参考图
         self.load_reference_image()
 
-        # 启动摄像头
-        self.start_camera()
+        # 启动摄像头更新和校准检测
+        self.start_camera_updates()
 
     def create_ui(self):
         """创建用户界面"""
@@ -214,51 +216,40 @@ class CameraCalibrationSystem:
             self.ref_photo = ImageTk.PhotoImage(img_pil)
             self.ref_label.configure(image=self.ref_photo, text="")
 
-    def start_camera(self):
-        """启动摄像头"""
-        try:
-            self.cap = cv2.VideoCapture(0)
-            if not self.cap.isOpened():
-                raise Exception("无法打开摄像头")
+    def start_camera_updates(self):
+        """启动摄像头更新和校准检测"""
+        # 启动摄像头画面更新线程
+        self.camera_thread = threading.Thread(target=self.update_camera)
+        self.camera_thread.daemon = True
+        self.camera_thread.start()
 
-            # 设置更高的分辨率
-            self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)  # 增加捕获分辨率
-            self.cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-
-            self.camera_running = True
-            self.camera_thread = threading.Thread(target=self.update_camera)
-            self.camera_thread.daemon = True
-            self.camera_thread.start()
-
-            # 启动校准检测
-            self.calibration_thread = threading.Thread(target=self.calibration_loop)
-            self.calibration_thread.daemon = True
-            self.calibration_thread.start()
-
-        except Exception as e:
-            messagebox.showerror("错误", f"摄像头初始化失败: {str(e)}")
+        # 启动校准检测线程
+        self.calibration_thread = threading.Thread(target=self.calibration_loop)
+        self.calibration_thread.daemon = True
+        self.calibration_thread.start()
 
     def update_camera(self):
-        """更新摄像头画面"""
-        while self.camera_running:
-            if self.cap is not None:
-                ret, frame = self.cap.read()
-                if ret:
-                    # 保存原始画面，不进行镜像翻转
-                    self.current_frame = frame.copy()
+        """更新摄像头画面 - 使用全局camera实例"""
+        while self.running:
+            # 使用全局camera实例获取帧
+            ret, frame = camera.get_frame()
+            if ret and frame is not None:
+                # 保存原始画面，不进行镜像翻转
+                self.current_frame = frame.copy()
 
-                    # 添加校准框
-                    self.draw_calibration_overlay(frame)
+                # 添加校准框
+                display_frame = frame.copy()
+                self.draw_calibration_overlay(display_frame)
 
-                    # 转换为tkinter可显示的格式（增大显示尺寸）
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frame_pil = Image.fromarray(frame_rgb)
-                    frame_pil = frame_pil.resize((800, 600))  # 显著增大显示尺寸
+                # 转换为tkinter可显示的格式（增大显示尺寸）
+                frame_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+                frame_pil = Image.fromarray(frame_rgb)
+                frame_pil = frame_pil.resize((800, 600))  # 显著增大显示尺寸
 
-                    photo = ImageTk.PhotoImage(frame_pil)
+                photo = ImageTk.PhotoImage(frame_pil)
 
-                    # 在主线程中更新UI
-                    self.root.after(0, self.update_camera_display, photo)
+                # 在主线程中更新UI
+                self.root.after(0, self.update_camera_display, photo)
 
             time.sleep(0.033)  # 约30FPS
 
@@ -317,12 +308,13 @@ class CameraCalibrationSystem:
 
     def update_camera_display(self, photo):
         """更新摄像头显示"""
-        self.camera_label.configure(image=photo)
-        self.camera_label.image = photo
+        if self.running:  # 只有在运行状态下才更新显示
+            self.camera_label.configure(image=photo)
+            self.camera_label.image = photo
 
     def calibration_loop(self):
         """校准检测循环"""
-        while self.camera_running and not self.is_calibrated:
+        while self.running and not self.is_calibrated:
             if self.current_frame is not None and self.reference_image is not None:
                 # 计算校准分数
                 score = self.calculate_calibration_score(self.current_frame)
@@ -432,6 +424,9 @@ class CameraCalibrationSystem:
 
     def update_calibration_ui(self, score):
         """更新校准UI"""
+        if not self.running:  # 如果程序正在关闭，不更新UI
+            return
+
         # 更新进度条和分数
         self.progress_bar['value'] = score * 100
         self.score_var.set(f"{int(score * 100)}%")
@@ -441,7 +436,7 @@ class CameraCalibrationSystem:
             self.status_var.set("校准完成！摄像头已准备就绪")
             self.status_label.configure(fg='#16a34a')
             self.next_btn.configure(state='normal')
-            #接入电路配盘系统
+            self.start_detection()
         elif self.reference_image is None:
             self.status_var.set("参考图片未加载")
             self.status_label.configure(fg='#dc2626')
@@ -477,14 +472,14 @@ class CameraCalibrationSystem:
     def countdown_loop(self):
         """倒计时循环 - 恢复标准时间"""
         for i in range(3, 0, -1):  # 恢复到3秒
-            if not self.is_stabilizing:
+            if not self.is_stabilizing or not self.running:
                 break
 
             self.countdown = i
             self.root.after(0, lambda: self.countdown_var.set(f"保持稳定 {i}s"))
             time.sleep(1)
 
-        if self.is_stabilizing:
+        if self.is_stabilizing and self.running:
             self.is_calibrated = True
             self.is_stabilizing = False
             self.countdown = 0
@@ -508,15 +503,46 @@ class CameraCalibrationSystem:
             self.calibration_thread.start()
 
     def start_detection(self):
-        """开始检测"""
-        messagebox.showinfo("提示", "校准完成！\n即将进入电路配盘检测模式...")
+        """开始检测 - 校准完成后的程序出口"""
+        # 显示提示信息
+        result = messagebox.askquestion("校准完成",
+                                        "校准完成！\n是否进入电路配盘检测模式？\n\n点击'是'将关闭校准窗口并启动检测程序。",
+                                        icon='question')
+
+        if result == 'yes':
+            # 这里是程序的出口点 - 校准完成后关闭窗口
+            print("校准完成，准备启动检测程序...")
+
+            # 停止所有线程
+            self.running = False
+
+            # 延迟关闭窗口，确保线程能够正常结束
+            self.root.after(500, self.close_window)
+
+    def close_window(self):
+        """关闭窗口"""
+        try:
+            self.root.quit()
+            self.root.destroy()
+            print("校准窗口已关闭")
+
+            # 在这里可以调用下一个程序或返回到主程序
+            # 例如:
+            # import main_detection_system
+            # main_detection_system.run()
+
+        except Exception as e:
+            print(f"关闭窗口时发生错误: {e}")
 
     def on_closing(self):
         """关闭程序"""
-        self.camera_running = False
-        if self.cap is not None:
-            self.cap.release()
-        self.root.destroy()
+        self.running = False
+        # 等待线程结束
+        time.sleep(0.2)
+        try:
+            self.root.destroy()
+        except:
+            pass
 
     def run(self):
         """运行程序"""
