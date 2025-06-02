@@ -441,6 +441,7 @@ class CameraCalibrationSystem:
             self.status_var.set("校准完成！摄像头已准备就绪")
             self.status_label.configure(fg='#16a34a')
             self.next_btn.configure(state='normal')
+            #接入电路配盘系统
         elif self.reference_image is None:
             self.status_var.set("参考图片未加载")
             self.status_label.configure(fg='#dc2626')

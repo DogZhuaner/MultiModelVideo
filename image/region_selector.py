@@ -1,6 +1,7 @@
 """
-图像区域选择器
+图像区域选择器（修改版）
 功能：在标准图上手动选择多个区域，提取特征并保存
+优化：图像放大显示，尽量占满UI界面
 """
 
 import cv2
@@ -11,7 +12,6 @@ from datetime import datetime
 import tkinter as tk
 from tkinter import messagebox, simpledialog
 from PIL import Image, ImageTk
-
 
 class RegionSelector:
     def __init__(self, reference_image_path):
@@ -54,8 +54,8 @@ class RegionSelector:
 
             # 获取边界框
             x, y, w, h = cv2.boundingRect(pts)
-            region_roi = self.reference_image[y:y + h, x:x + w]
-            mask_roi = mask[y:y + h, x:x + w]
+            region_roi = self.reference_image[y:y+h, x:x+w]
+            mask_roi = mask[y:y+h, x:x+w]
 
             features = {
                 'bbox': [int(x), int(y), int(w), int(h)],
@@ -86,8 +86,7 @@ class RegionSelector:
                 'perimeter': float(cv2.arcLength(contour, True)),
                 'aspect_ratio': float(w / h) if h > 0 else 0,
                 'extent': float(features['area'] / (w * h)) if w * h > 0 else 0,
-                'solidity': float(features['area'] / cv2.contourArea(cv2.convexHull(contour))) if cv2.contourArea(
-                    cv2.convexHull(contour)) > 0 else 0
+                'solidity': float(features['area'] / cv2.contourArea(cv2.convexHull(contour))) if cv2.contourArea(cv2.convexHull(contour)) > 0 else 0
             }
 
             # 4. SIFT关键点特征
@@ -104,8 +103,8 @@ class RegionSelector:
 
             # 5. 统计特征
             features['statistics'] = {
-                'mean_color': [float(np.mean(region_roi[:, :, i])) for i in range(3)],
-                'std_color': [float(np.std(region_roi[:, :, i])) for i in range(3)],
+                'mean_color': [float(np.mean(region_roi[:,:,i])) for i in range(3)],
+                'std_color': [float(np.std(region_roi[:,:,i])) for i in range(3)],
                 'mean_gray': float(np.mean(gray_roi)),
                 'std_gray': float(np.std(gray_roi))
             }
@@ -123,8 +122,8 @@ class RegionSelector:
             lbp = np.zeros_like(gray_image)
 
             # 简化的LBP计算
-            for i in range(1, height - 1):
-                for j in range(1, width - 1):
+            for i in range(1, height-1):
+                for j in range(1, width-1):
                     if mask[i, j] == 0:
                         continue
 
@@ -133,9 +132,9 @@ class RegionSelector:
 
                     # 8邻域LBP
                     neighbors = [
-                        gray_image[i - 1, j - 1], gray_image[i - 1, j], gray_image[i - 1, j + 1],
-                        gray_image[i, j + 1], gray_image[i + 1, j + 1], gray_image[i + 1, j],
-                        gray_image[i + 1, j - 1], gray_image[i, j - 1]
+                        gray_image[i-1, j-1], gray_image[i-1, j], gray_image[i-1, j+1],
+                        gray_image[i, j+1], gray_image[i+1, j+1], gray_image[i+1, j],
+                        gray_image[i+1, j-1], gray_image[i, j-1]
                     ]
 
                     for idx, neighbor in enumerate(neighbors):
@@ -156,34 +155,34 @@ class RegionSelector:
         """创建图形界面"""
         self.root = tk.Tk()
         self.root.title("区域选择器 - 点击选择区域")
-        self.root.geometry("1200x800")
+        self.root.geometry("1500x1100")  # 进一步增大窗口尺寸以容纳大图像
 
-        # 控制面板
+        # 控制面板 - 紧凑布局
         control_frame = tk.Frame(self.root)
-        control_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=5)
+        control_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=3)
 
-        tk.Label(control_frame, text="操作说明：左键点击选择区域顶点，右键完成当前区域选择",
-                 font=("Arial", 10)).pack(side=tk.LEFT)
+        tk.Label(control_frame, text="操作：左键选择顶点，右键完成区域",
+                font=("Arial", 9)).pack(side=tk.LEFT)
 
-        tk.Button(control_frame, text="保存所有区域", command=self.save_regions,
-                  bg='#4CAF50', fg='white', font=("Arial", 10, "bold")).pack(side=tk.RIGHT, padx=5)
+        tk.Button(control_frame, text="保存", command=self.save_regions,
+                 bg='#4CAF50', fg='white', font=("Arial", 9, "bold")).pack(side=tk.RIGHT, padx=2)
 
-        tk.Button(control_frame, text="撤销上一个点", command=self.undo_last_point,
-                  bg='#FF9800', fg='white', font=("Arial", 10)).pack(side=tk.RIGHT, padx=5)
+        tk.Button(control_frame, text="撤销", command=self.undo_last_point,
+                 bg='#FF9800', fg='white', font=("Arial", 9)).pack(side=tk.RIGHT, padx=2)
 
-        tk.Button(control_frame, text="清除当前区域", command=self.clear_current_region,
-                  bg='#f44336', fg='white', font=("Arial", 10)).pack(side=tk.RIGHT, padx=5)
+        tk.Button(control_frame, text="清除", command=self.clear_current_region,
+                 bg='#f44336', fg='white', font=("Arial", 9)).pack(side=tk.RIGHT, padx=2)
 
-        # 信息面板
+        # 信息面板 - 紧凑布局
         info_frame = tk.Frame(self.root)
-        info_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=2)
+        info_frame.pack(side=tk.TOP, fill=tk.X, padx=5, pady=1)
 
-        self.info_label = tk.Label(info_frame, text=f"已选择区域数量: 0", font=("Arial", 9))
+        self.info_label = tk.Label(info_frame, text=f"已选择区域数量: 0", font=("Arial", 8))
         self.info_label.pack(side=tk.LEFT)
 
-        # 图像显示区域
-        self.canvas = tk.Canvas(self.root, bg='white')
-        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # 图像显示区域 - 增大显示区域
+        self.canvas = tk.Canvas(self.root, bg='white', highlightthickness=0)
+        self.canvas.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # 绑定鼠标事件
         self.canvas.bind("<Button-1>", self.on_left_click)
@@ -195,14 +194,24 @@ class RegionSelector:
 
     def display_image_on_canvas(self):
         """在画布上显示图像"""
-        # 计算适合画布的图像尺寸
-        canvas_width = 1000
-        canvas_height = 600
+        # 获取实际画布尺寸，尽量占满界面
+        self.canvas.update()
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+
+        # 如果画布还没有渲染完成，使用默认大尺寸
+        if canvas_width <= 1 or canvas_height <= 1:
+            canvas_width = 1150  # 增大默认宽度
+            canvas_height = 750  # 增大默认高度
+
+        # 留一些边距
+        canvas_width -= 20
+        canvas_height -= 20
 
         h, w = self.reference_image.shape[:2]
         scale_w = canvas_width / w
         scale_h = canvas_height / h
-        self.scale_factor = min(scale_w, scale_h, 1.0)
+        self.scale_factor = min(scale_w, scale_h)  # 移除1.0限制，允许放大
 
         new_width = int(w * self.scale_factor)
         new_height = int(h * self.scale_factor)
@@ -215,11 +224,11 @@ class RegionSelector:
         pil_img = Image.fromarray(display_img_rgb)
         self.canvas_image = ImageTk.PhotoImage(pil_img)
 
-        # 在画布中央显示图像
+        # 在画布中央显示图像，尽量占满空间
         self.canvas.delete("all")
         self.canvas.config(scrollregion=self.canvas.bbox("all"))
         self.canvas_img_id = self.canvas.create_image(
-            canvas_width // 2, canvas_height // 2,
+            (canvas_width + 20)//2, (canvas_height + 20)//2,
             image=self.canvas_image, anchor="center"
         )
 
@@ -233,8 +242,8 @@ class RegionSelector:
         canvas_y = self.canvas.canvasy(event.y)
 
         # 获取图像在画布中的位置
-        img_x = canvas_x - self.canvas.coords(self.canvas_img_id)[0] + self.canvas_image.width() // 2
-        img_y = canvas_y - self.canvas.coords(self.canvas_img_id)[1] + self.canvas_image.height() // 2
+        img_x = canvas_x - self.canvas.coords(self.canvas_img_id)[0] + self.canvas_image.width()//2
+        img_y = canvas_y - self.canvas.coords(self.canvas_img_id)[1] + self.canvas_image.height()//2
 
         # 转换到原始图像坐标
         orig_x = int(img_x / self.scale_factor)
@@ -307,8 +316,8 @@ class RegionSelector:
 
         # 获取图像在画布中的位置
         img_center_x, img_center_y = self.canvas.coords(self.canvas_img_id)
-        img_left = img_center_x - self.canvas_image.width() // 2
-        img_top = img_center_y - self.canvas_image.height() // 2
+        img_left = img_center_x - self.canvas_image.width()//2
+        img_top = img_center_y - self.canvas_image.height()//2
 
         # 绘制已完成的区域
         for i, region in enumerate(self.regions):
@@ -324,8 +333,8 @@ class RegionSelector:
                 # 绘制区域标签
                 center_x = sum(canvas_points[::2]) / len(canvas_points[::2])
                 center_y = sum(canvas_points[1::2]) / len(canvas_points[1::2])
-                self.canvas.create_text(center_x, center_y, text=f"区域{i + 1}",
-                                        fill='red', font=("Arial", 12, "bold"), tags='completed')
+                self.canvas.create_text(center_x, center_y, text=f"区域{i+1}",
+                                      fill='red', font=("Arial", 12, "bold"), tags='completed')
 
         # 绘制当前正在选择的区域
         if self.current_region:
@@ -336,21 +345,21 @@ class RegionSelector:
                 canvas_points.extend([canvas_x, canvas_y])
 
                 # 绘制顶点
-                self.canvas.create_oval(canvas_x - 3, canvas_y - 3, canvas_x + 3, canvas_y + 3,
-                                        fill='blue', outline='blue', tags='current')
+                self.canvas.create_oval(canvas_x-3, canvas_y-3, canvas_x+3, canvas_y+3,
+                                      fill='blue', outline='blue', tags='current')
 
             # 绘制线段
             if len(canvas_points) >= 4:
-                for i in range(0, len(canvas_points) - 2, 2):
-                    self.canvas.create_line(canvas_points[i], canvas_points[i + 1],
-                                            canvas_points[i + 2], canvas_points[i + 3],
-                                            fill='blue', width=2, tags='current')
+                for i in range(0, len(canvas_points)-2, 2):
+                    self.canvas.create_line(canvas_points[i], canvas_points[i+1],
+                                          canvas_points[i+2], canvas_points[i+3],
+                                          fill='blue', width=2, tags='current')
 
             # 绘制到鼠标的预览线
             if mouse_pos and len(canvas_points) >= 2:
                 self.canvas.create_line(canvas_points[-2], canvas_points[-1],
-                                        mouse_pos[0], mouse_pos[1],
-                                        fill='gray', width=1, dash=(5, 5), tags='current')
+                                      mouse_pos[0], mouse_pos[1],
+                                      fill='gray', width=1, dash=(5, 5), tags='current')
 
     def update_info_label(self):
         """更新信息标签"""
@@ -366,7 +375,7 @@ class RegionSelector:
             # 生成文件名
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             base_name = os.path.splitext(os.path.basename(self.reference_image_path))[0]
-            save_path = f"regions_{base_name}_{timestamp}.json"
+            save_path = f"regions_rules.json"
 
             # 保存数据
             save_data = {
@@ -392,17 +401,15 @@ class RegionSelector:
         self.create_gui()
         self.root.mainloop()
 
-
 def main():
     # 配置参考图像路径
-    REFERENCE_IMAGE_PATH = "reference.jpg"  # 修改为你的参考图像路径
+    REFERENCE_IMAGE_PATH = "standard/standard.jpg"  # 修改为你的参考图像路径
 
     try:
         selector = RegionSelector(REFERENCE_IMAGE_PATH)
         selector.run()
     except Exception as e:
         print(f"程序运行失败: {e}")
-
 
 if __name__ == "__main__":
     main()

@@ -25,3 +25,6 @@ def check_and_capture_once():
                 cv2.imwrite(f"image/live_capture.jpg", frame)
                 print("📸 拍照完成")
                 has_captured = True  # 标记为已拍照
+                #下一步送入image_matcher切分
+
+
