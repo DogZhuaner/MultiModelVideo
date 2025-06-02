@@ -1,8 +1,12 @@
 # capture_logic.py
 import time
 import cv2
+
+from MultiModelVideo.image import image_matcher
 from cameraManager import camera
 from handDetection import is_hand_present
+from MultiModelVideo.image import image_matcher
+
 
 last_no_hand_time = None
 has_captured = False
@@ -26,5 +30,6 @@ def check_and_capture_once():
                 print("📸 拍照完成")
                 has_captured = True  # 标记为已拍照
                 #下一步送入image_matcher切分
+                image_matcher.main()
 
 

@@ -10,6 +10,11 @@ import json
 import os
 from datetime import datetime
 
+base_dir = os.path.dirname(os.path.abspath(__file__))
+json_path = os.path.join(base_dir, "regions_rules.json")
+image_path = os.path.join(base_dir, "live_capture.jpg")
+reference_path = os.path.join(base_dir, "standard.jpg")
+
 class ImageMatcher:
     def __init__(self, regions_file_path, target_image_path):
         """
@@ -62,7 +67,7 @@ class ImageMatcher:
             with open(self.regions_file_path, 'r', encoding='utf-8') as f:
                 self.regions_data = json.load(f)
 
-            self.reference_image_path = self.regions_data['reference_image']
+            self.reference_image_path = reference_path
 
             # 加载参考图像
             if not os.path.exists(self.reference_image_path):
@@ -507,9 +512,9 @@ def main():
     # ==================== 配置区域 ====================
     # 修改这些路径为你的实际文件路径
 
-    REGIONS_FILE_PATH = ".json"  # 区域特征文件路径
-    TARGET_IMAGE_PATH = "live_capture.jpg"                        # 目标图像路径
-    regions_rules
+    REGIONS_FILE_PATH = json_path  # 区域特征文件路径
+    TARGET_IMAGE_PATH = image_path # 目标图像路径
+
     # ================================================
 
     try:

@@ -13,6 +13,9 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog
 from PIL import Image, ImageTk
 
+base_dir = os.path.dirname(os.path.abspath(__file__))
+reference_path = os.path.join(base_dir, "standard.jpg")
+
 class RegionSelector:
     def __init__(self, reference_image_path):
         self.reference_image_path = reference_image_path
@@ -403,7 +406,7 @@ class RegionSelector:
 
 def main():
     # 配置参考图像路径
-    REFERENCE_IMAGE_PATH = "standard/standard.jpg"  # 修改为你的参考图像路径
+    REFERENCE_IMAGE_PATH = reference_path   # 修改为你的参考图像路径
 
     try:
         selector = RegionSelector(REFERENCE_IMAGE_PATH)
