@@ -6,7 +6,14 @@ import time
 import numpy as np
 from PIL import Image, ImageTk
 import os
-from MultiModelVideo.cameraManager import camera
+from cameraManager import camera
+import sys
+import importlib.util
+
+# 动态导入main_GPT模块
+spec = importlib.util.spec_from_file_location("main_GPT", "../main_GPT.py")
+main_GPT = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(main_GPT)
 
 
 class CameraCalibrationSystem:
@@ -518,6 +525,9 @@ class CameraCalibrationSystem:
 
             # 延迟关闭窗口，确保线程能够正常结束
             self.root.after(500, self.close_window)
+
+            # 启动主窗口
+            main_GPT.launch_main_window()
 
     def close_window(self):
         """关闭窗口"""
