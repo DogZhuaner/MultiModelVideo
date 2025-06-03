@@ -463,7 +463,7 @@ class MainWindow(QMainWindow):
             self.btn_analyze.setEnabled(True)
             self.btn_describe.setEnabled(True)
             self.statusBar().showMessage("摄像头显示运行中... (使用摄像头管理器)")
-            sh.start_handDetecton()
+
 
     def _update_video_frame(self, frame_data):
         """更新视频帧显示"""
